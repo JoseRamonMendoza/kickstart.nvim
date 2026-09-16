@@ -425,11 +425,18 @@ do
   -- - sr)'  - [S]urround [R]eplace [)] [']
   require('mini.surround').setup()
 
+  -- Jump around
+  require('mini.jump2d').setup {
+    labels = 'qwertyasdfghzxcvbuiopjklnm',
+    view = {
+      dim = true,
+      n_steps_ahead = 2,
+    },
+  }
+  vim.keymap.set({ 'o', 'x', 'n' }, 's', '<Cmd>lua MiniJump2d.start(MiniJump2d.builtin_opts.single_character)<CR>', { desc = 'Jump anywhere' })
+
   -- Simple and easy statusline.
-  --  You could remove this setup call if you don't like it,
-  --  and try some other statusline plugin
   local statusline = require 'mini.statusline'
-  -- Set `use_icons` to true if you have a Nerd Font
   statusline.setup { use_icons = vim.g.have_nerd_font }
 
   -- You can configure sections in the statusline by overriding their
