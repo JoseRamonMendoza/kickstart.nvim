@@ -140,7 +140,7 @@ do
     underline = { severity = { min = vim.diagnostic.severity.WARN } },
 
     -- Can switch between these as you prefer
-    virtual_lines = true,
+    virtual_text = true,
 
     -- Auto open the float, so you can easily read the errors when jumping with `[d` and `]d`
     jump = {
@@ -324,6 +324,9 @@ do
 
       -- Normal mode actions
       --
+      -- Gitsigns
+      vim.keymap.set('n', '<leader>hg', ':Gitsigns', { desc = 'git [g]itsigns', buf = bufnr })
+
       -- Stage/Reset current hunk
       vim.keymap.set('n', '<leader>hs', gitsigns.stage_hunk, { desc = 'git [s]tage hunk', buf = bufnr })
       vim.keymap.set('n', '<leader>hr', gitsigns.reset_hunk, { desc = 'git [r]eset hunk', buf = bufnr })
@@ -333,15 +336,12 @@ do
       vim.keymap.set('n', '<leader>hR', gitsigns.reset_buffer, { desc = 'git [R]eset buffer', buf = bufnr })
 
       -- Preview and Blame
-      vim.keymap.set('n', '<leader>hp', gitsigns.preview_hunk, { desc = 'git [p]review hunk', buf = bufnr })
       vim.keymap.set('n', '<leader>hi', gitsigns.preview_hunk_inline, { desc = 'git preview hunk [i]nline', buf = bufnr })
       vim.keymap.set('n', '<leader>hb', function() gitsigns.blame_line { full = true } end, { desc = 'git [b]lame line', buf = bufnr })
 
       --Diffing
       vim.keymap.set('n', '<leader>hd', gitsigns.diffthis, { desc = 'git [d]iff against index', buf = bufnr })
       vim.keymap.set('n', '<leader>hD', function() gitsigns.diffthis '~' end, { desc = 'git [D]iff against last commit', buf = bufnr })
-      vim.keymap.set('n', '<leader>hQ', function() gitsigns.setqflist 'all' end, { desc = 'git hunk [Q]uickfix list (all files in repo)', buf = bufnr })
-      vim.keymap.set('n', '<leader>hq', gitsigns.setqflist, { desc = 'git hunk [q]uickfix list (all changes in this file)', buf = bufnr })
 
       -- Toggles
       vim.keymap.set('n', '<leader>tb', gitsigns.toggle_current_line_blame, { desc = '[T]oggle git show [b]lame line', buf = bufnr })
@@ -427,13 +427,16 @@ do
 
   -- Jump around
   require('mini.jump2d').setup {
-    labels = 'qwertyasdfghzxcvbuiopjklnm',
+    labels = 'asdfjklghqwertyuiopzxcvbnmASDFJKLGHQWERTYUIOPZXCVBNM',
     view = {
       dim = true,
       n_steps_ahead = 2,
     },
   }
   vim.keymap.set({ 'o', 'x', 'n' }, 's', '<Cmd>lua MiniJump2d.start(MiniJump2d.builtin_opts.single_character)<CR>', { desc = 'Jump anywhere' })
+
+  -- Modify jump2d highlight group to be more visible and don't have underline
+  vim.api.nvim_set_hl(0, 'MiniJump2dSpot', { fg = '#ff6c6c', bold = true })
 
   -- Simple and easy statusline.
   local statusline = require 'mini.statusline'
