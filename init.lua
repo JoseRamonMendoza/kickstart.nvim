@@ -183,6 +183,13 @@ do
     group = vim.api.nvim_create_augroup('kickstart-highlight-yank', { clear = true }),
     callback = function() vim.hl.on_yank() end,
   })
+
+  -- Toogle on/off diagnostics visibility
+  vim.keymap.set('n', '<leader>td', function()
+    local is_enabled = vim.diagnostic.is_enabled()
+    vim.diagnostic.enable(not is_enabled)
+    print('Diagnostics ' .. (is_enabled and 'Disabled' or 'Enabled'))
+  end, { desc = '[T]oggle [d]iagnostics visibility' })
 end
 
 -- ============================================================
@@ -964,7 +971,7 @@ do
   -- require 'kickstart.plugins.indent_line'
   -- require 'kickstart.plugins.lint'
   -- require 'kickstart.plugins.autopairs'
-  -- require 'kickstart.plugins.neo-tree'
+  require 'kickstart.plugins.neo-tree'
 
   -- NOTE: You can add your own plugins, configuration, etc. in `lua/custom/plugins/*.lua`.
   --
@@ -983,3 +990,110 @@ end
 
 -- The line beneath this is called `modeline`. See `:help modeline`
 -- vim: ts=2 sts=2 sw=2 et
+
+-- ============================================================
+-- SECTION 11: DEBUGGING & BUILD AUTOMATION
+-- Termdebug (GDB) integration, build scripts, and debug mappings
+-- ============================================================
+do
+  -- [[ Native GDB Debugger Setup (Termdebug) ]]
+  vim.cmd 'packadd! termdebug'
+
+  -- Display GDB terminal side-by-side with source code (vertical split)
+  vim.g.termdebug_config = {
+    wide = 1,
+    disasm_window_height = 15,
+  }
+
+  -- Automatically close empty 'gdb program' window on startup
+  local function close_program_window()
+    for _, win in ipairs(vim.api.nvim_list_wins()) do
+      local buf = vim.api.nvim_win_get_buf(win)
+      local name = vim.api.nvim_buf_get_name(buf)
+      if name:match 'gdb program' then
+        vim.api.nvim_win_close(win, false)
+        break
+      end
+    end
+  end
+
+  vim.api.nvim_create_autocmd('User', {
+    pattern = 'TermdebugStartPost',
+    group = vim.api.nvim_create_augroup('kickstart-termdebug-close', { clear = true }),
+    callback = function() vim.defer_fn(close_program_window, 50) end,
+  })
+
+  -- [[ Build & Run Helpers ]]
+
+  -- Helper function: Locates build.sh and resolves the executable binary path
+  local function get_binary_path()
+    local build_script = vim.fn.findfile('build.sh', '.;')
+    if build_script == '' then
+      vim.notify('build.sh not found in current or parent directories.', vim.log.levels.ERROR)
+      return nil
+    end
+
+    local project_root = vim.fn.fnamemodify(build_script, ':p:h')
+    local path = ''
+    local name = ''
+
+    for line in io.lines(build_script) do
+      -- Parse build_path and build_name directly from the bash script
+      local matched_path = line:match '^build_path=["\']?(.-)["\']?$'
+      if matched_path then path = matched_path end
+
+      local matched_name = line:match '^build_name=["\']?(.-)["\']?$'
+      if matched_name then name = matched_name end
+    end
+
+    return vim.fn.simplify(project_root .. '/' .. path .. '/' .. name)
+  end
+
+  -- Launches Termdebug using the path resolved by get_binary_path()
+  local function start_debug_session()
+    local binary = get_binary_path()
+    if binary and binary ~= '' then vim.cmd('Termdebug ' .. vim.fn.fnameescape(binary)) end
+  end
+
+  -- Saves active buffer, executes build.sh, and runs the compiled binary
+  local function build_and_run()
+    local build_script = vim.fn.findfile('build.sh', '.;')
+    if build_script == '' then
+      vim.notify('build.sh not found in current or parent directories.', vim.log.levels.ERROR)
+      return
+    end
+
+    local project_root = vim.fn.fnamemodify(build_script, ':p:h')
+    local binary = get_binary_path()
+    if not binary or binary == '' then return end
+
+    vim.cmd 'write'
+    vim.cmd 'split'
+    vim.cmd('terminal cd ' .. vim.fn.shellescape(project_root) .. ' && ./build.sh && ' .. vim.fn.shellescape(binary))
+    vim.cmd 'startinsert'
+  end
+
+  -- [[ Mappings ]]
+
+  -- Build & Run
+  vim.keymap.set('n', '<F7>', build_and_run, { desc = 'Build & Run Project' })
+
+  -- Start Termdebug or Continue if already running
+  vim.keymap.set('n', '<F5>', function()
+    if vim.fn.exists ':Continue' == 2 then
+      vim.cmd 'Continue'
+    else
+      start_debug_session()
+    end
+  end, { desc = 'Start or Continue Termdebug' })
+
+  -- Standard IDE Debugger Mappings
+  vim.keymap.set('n', '<F9>', '<cmd>Over<CR>', { desc = 'Step Over' })
+  vim.keymap.set('n', '<F10>', '<cmd>Step<CR>', { desc = 'Step Into' })
+  vim.keymap.set('n', '<F11>', '<cmd>Finish<CR>', { desc = 'Step Out' })
+
+  vim.keymap.set('n', '<leader>gb', '<cmd>Break<CR>', { desc = '[G]DB Toggle [b]reakpoint' })
+  vim.keymap.set('n', '<leader>gB', '<cmd>Clear<CR>', { desc = '[G]DB Clear [B]reakpoint' })
+
+  vim.keymap.set('n', '<leader>ge', '<cmd>Evaluate<CR>', { desc = '[G]DB [E]valuate Variable' })
+end
