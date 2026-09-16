@@ -1025,15 +1025,21 @@ do
 
   -- [[ Build & Run Helpers ]]
 
+  -- HACK: All Build & Run Helpers should be improved to have a more standard
+  -- way of working with make
+  --
   -- Helper function: Locates build.sh and resolves the executable binary path
   local function get_binary_path()
-    local build_script = vim.fn.findfile('build.sh', '.;')
-    if build_script == '' then
+    -- Use Neovim's modern fs API to find the file upwards from the current directory
+    local matches = vim.fs.find('build.sh', { upward = true, path = vim.fn.getcwd() })
+    local build_script = matches[1] -- Safely extract the first match (a strict string)
+
+    if not build_script then
       vim.notify('build.sh not found in current or parent directories.', vim.log.levels.ERROR)
       return nil
     end
 
-    local project_root = vim.fn.fnamemodify(build_script, ':p:h')
+    local project_root = vim.fs.dirname(build_script)
     local path = ''
     local name = ''
 
@@ -1057,13 +1063,15 @@ do
 
   -- Saves active buffer, executes build.sh, and runs the compiled binary
   local function build_and_run()
-    local build_script = vim.fn.findfile('build.sh', '.;')
-    if build_script == '' then
+    local matches = vim.fs.find('build.sh', { upward = true, path = vim.fn.getcwd() })
+    local build_script = matches[1]
+
+    if not build_script then
       vim.notify('build.sh not found in current or parent directories.', vim.log.levels.ERROR)
       return
     end
 
-    local project_root = vim.fn.fnamemodify(build_script, ':p:h')
+    local project_root = vim.fs.dirname(build_script)
     local binary = get_binary_path()
     if not binary or binary == '' then return end
 
@@ -1072,7 +1080,6 @@ do
     vim.cmd('terminal cd ' .. vim.fn.shellescape(project_root) .. ' && ./build.sh && ' .. vim.fn.shellescape(binary))
     vim.cmd 'startinsert'
   end
-
   -- [[ Mappings ]]
 
   -- Build & Run
