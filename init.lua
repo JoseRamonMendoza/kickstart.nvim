@@ -156,6 +156,13 @@ do
 
   vim.keymap.set('n', '<leader>q', vim.diagnostic.setloclist, { desc = 'Open diagnostic [Q]uickfix list' })
 
+  -- Toogle on/off diagnostics visibility
+  vim.keymap.set('n', '<leader>td', function()
+    local is_enabled = vim.diagnostic.is_enabled()
+    vim.diagnostic.enable(not is_enabled)
+    print('Diagnostics ' .. (is_enabled and 'Disabled' or 'Enabled'))
+  end, { desc = '[T]oggle [d]iagnostics visibility' })
+
   -- Exit terminal mode in the builtin terminal with a shortcut that is a bit easier
   -- for people to discover. Otherwise, you normally need to press <C-\><C-n>, which
   -- is not what someone will guess without a bit more experience.
@@ -183,13 +190,6 @@ do
     group = vim.api.nvim_create_augroup('kickstart-highlight-yank', { clear = true }),
     callback = function() vim.hl.on_yank() end,
   })
-
-  -- Toogle on/off diagnostics visibility
-  vim.keymap.set('n', '<leader>td', function()
-    local is_enabled = vim.diagnostic.is_enabled()
-    vim.diagnostic.enable(not is_enabled)
-    print('Diagnostics ' .. (is_enabled and 'Disabled' or 'Enabled'))
-  end, { desc = '[T]oggle [d]iagnostics visibility' })
 end
 
 -- ============================================================
