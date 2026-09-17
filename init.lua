@@ -433,7 +433,7 @@ do
       n_steps_ahead = 2,
     },
   }
-  vim.keymap.set({ 'o', 'x', 'n' }, 's', '<Cmd>lua MiniJump2d.start(MiniJump2d.builtin_opts.single_character)<CR>', { desc = 'Jump anywhere' })
+  vim.keymap.set({ 'o', 'x', 'n' }, '<Cr>', '<Cmd>lua MiniJump2d.start(MiniJump2d.builtin_opts.single_character)<CR>', { desc = 'Jump anywhere' })
 
   -- Modify jump2d highlight group to be more visible and don't have underline
   vim.api.nvim_set_hl(0, 'MiniJump2dSpot', { fg = '#ff6c6c', bold = true })
