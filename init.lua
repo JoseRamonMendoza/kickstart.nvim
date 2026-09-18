@@ -432,11 +432,8 @@ do
       dim = true,
       n_steps_ahead = 2,
     },
-    mappings = {
-      start_jumping = '',
-    },
   }
-  vim.keymap.set({ 'o', 'x', 'n' }, 's', '<Cmd>lua MiniJump2d.start(MiniJump2d.builtin_opts.single_character)<CR>', { desc = 'Jump anywhere' })
+  vim.keymap.set({ 'o', 'x', 'n' }, '<Cr>', '<Cmd>lua MiniJump2d.start(MiniJump2d.builtin_opts.single_character)<CR>', { desc = 'Jump anywhere' })
 
   -- Modify jump2d highlight group to be more visible and don't have underline
   vim.api.nvim_set_hl(0, 'MiniJump2dSpot', { fg = '#ff6c6c', bold = true })
@@ -1043,9 +1040,9 @@ do
   -- way of working with make
   --
   -- Helper function: Locates build.sh and resolves the executable binary path
-  local function get_binary_path()
+  local function get_build_paths()
     -- Use Neovim's modern fs API to find the file upwards from the current directory
-    local matches = vim.fs.find('build.sh', { upward = true, path = vim.fn.getcwd() })
+    local matches = vim.fs.find('build.sh', { limit = 100, path = vim.fn.getcwd() })
     local build_script = matches[1] -- Safely extract the first match (a strict string)
 
     if not build_script then
@@ -1066,34 +1063,36 @@ do
       if matched_name then name = matched_name end
     end
 
-    return vim.fn.simplify(project_root .. '/' .. path .. '/' .. name)
+    if not path or not name then
+      vim.notify('path or name where not found.', vim.log.level.ERROR)
+      return nil
+    end
+
+    return {
+      binary_path = vim.fn.simplify(project_root .. '/' .. path .. '/' .. name),
+      build_script_path = build_script
+    }
   end
 
   -- Launches Termdebug using the path resolved by get_binary_path()
   local function start_debug_session()
-    local binary = get_binary_path()
-    if binary and binary ~= '' then vim.cmd('Termdebug ' .. vim.fn.fnameescape(binary)) end
+    local build_paths = get_build_paths()
+    if not build_paths then return end
+
+    vim.cmd('Termdebug ' .. vim.fn.fnameescape(build_paths.binary_path))
   end
 
   -- Saves active buffer, executes build.sh, and runs the compiled binary
   local function build_and_run()
-    local matches = vim.fs.find('build.sh', { upward = true, path = vim.fn.getcwd() })
-    local build_script = matches[1]
+    local build_paths = get_build_paths()
+    if not build_paths then return end
 
-    if not build_script then
-      vim.notify('build.sh not found in current or parent directories.', vim.log.levels.ERROR)
-      return
-    end
-
-    local project_root = vim.fs.dirname(build_script)
-    local binary = get_binary_path()
-    if not binary or binary == '' then return end
-
-    vim.cmd 'write'
-    vim.cmd 'split'
-    vim.cmd('terminal cd ' .. vim.fn.shellescape(project_root) .. ' && ./build.sh && ' .. vim.fn.shellescape(binary))
+    vim.cmd('split')
+    vim.cmd('terminal ' .. vim.fn.shellescape(build_paths.build_script_path) .. ' && ' .. vim.fn.shellescape(build_paths.binary_path))
     vim.cmd 'startinsert'
   end
+
+
   -- [[ Mappings ]]
 
   -- Build & Run
