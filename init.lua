@@ -177,6 +177,12 @@ do
   vim.keymap.set('n', '<C-j>', '<C-w><C-j>', { desc = 'Move focus to the lower window' })
   vim.keymap.set('n', '<C-k>', '<C-w><C-k>', { desc = 'Move focus to the upper window' })
 
+  -- Move in Insert mode
+  vim.keymap.set('i', '<C-h>', '<Left>')
+  vim.keymap.set('i', '<C-l>', '<Right>')
+  vim.keymap.set('i', '<C-j>', '<Down>')
+  vim.keymap.set('i', '<C-k>', '<Up>')
+
   -- Remove the default Ctrl+C -> Escape mapping in insert mode
   vim.keymap.set('i', '<C-c>', '', { noremap = true, silent = true })
 
@@ -358,7 +364,7 @@ do
     -- Delay between pressing a key and opening which-key (milliseconds)
     delay = 0,
     icons = { mappings = vim.g.have_nerd_font },
-    sort = { 'order', 'group' },
+    sort = { 'order', 'group', 'case' },
     -- Document existing key chains
     spec = {
       { '<leader>s', group = '[S]earch', mode = { 'n', 'v' } },
@@ -437,7 +443,6 @@ do
 
   -- Modify jump2d highlight group to be more visible and don't have underline
   vim.api.nvim_set_hl(0, 'MiniJump2dSpot', { fg = '#ff6c6c', bold = true })
-
 
   -- Simple and easy statusline.
   local statusline = require 'mini.statusline'
@@ -652,6 +657,51 @@ do
       --  For example, in C this would take you to the header.
       map('grD', vim.lsp.buf.declaration, '[G]oto [D]eclaration')
 
+      -- Track the dedicated documentation / definition window
+      local doc_win_id = nil
+
+      local function goto_definition_in_doc_win()
+
+        vim.lsp.buf.definition {
+          on_list = function(options)
+            local items = options.items
+            if not items or vim.tbl_isempty(items) then
+              vim.notify('No definition found', vim.log.levels.WARN)
+              return
+            end
+
+            -- If multiple definitions exist, show quickfix list
+            if #items > 1 then
+              vim.fn.setqflist({}, ' ', options)
+              vim.cmd 'botright copen'
+              return
+            end
+
+            local item = items[1]
+
+            -- 1. Ensure the dedicated doc window exists (create or reuse)
+            if not (doc_win_id and vim.api.nvim_win_is_valid(doc_win_id)) then
+              vim.cmd 'botright vsplit'
+              doc_win_id = vim.api.nvim_get_current_win()
+            else
+              vim.api.nvim_set_current_win(doc_win_id)
+            end
+
+            -- 2. Open file (switches to existing buffer if already opened)
+            vim.cmd('edit ' .. vim.fn.fnameescape(item.filename))
+
+            -- 3. Position cursor on definition and center view
+            local lnum = math.max(1, item.lnum or 1)
+            local col = math.max(0, (item.col or 1) - 1)
+            pcall(vim.api.nvim_win_set_cursor, doc_win_id, { lnum, col })
+            vim.cmd 'normal! zz'
+          end,
+        }
+      end
+
+      -- Keymap to trigger definition in the dedicated doc window
+      map('grw', goto_definition_in_doc_win, '[G]oto Definition in Doc [W]indow')
+
       -- The following two autocommands are used to highlight references of the
       -- word under your cursor when your cursor rests there for a little while.
       --    See `:help CursorHold` for information about when this is executed
@@ -767,6 +817,7 @@ do
   local ensure_installed = vim.tbl_keys(servers or {})
   vim.list_extend(ensure_installed, {
     -- You can add other tools here that you want Mason to install
+    'clang-format',
   })
 
   require('mason-tool-installer').setup { ensure_installed = ensure_installed }
@@ -809,6 +860,8 @@ do
       --
       -- You can use 'stop_after_first' to run the first available formatter from the list
       -- javascript = { "prettierd", "prettier", stop_after_first = true },
+      c = { 'clang-format' },
+      cpp = { 'clang-format' },
     },
   }
 
@@ -1046,11 +1099,10 @@ do
     local build_script = matches[1] -- Safely extract the first match (a strict string)
 
     if not build_script then
-      vim.notify('build.sh not found in current or parent directories.', vim.log.levels.ERROR)
+      vim.notify('build.sh not found in current or children directories.', vim.log.levels.ERROR)
       return nil
     end
 
-    local project_root = vim.fs.dirname(build_script)
     local path = ''
     local name = ''
 
@@ -1069,8 +1121,8 @@ do
     end
 
     return {
-      binary_path = vim.fn.simplify(project_root .. '/' .. path .. '/' .. name),
-      build_script_path = build_script
+      binary_path = vim.fn.simplify(path .. '/' .. name),
+      build_script_path = build_script,
     }
   end
 
@@ -1087,16 +1139,15 @@ do
     local build_paths = get_build_paths()
     if not build_paths then return end
 
-    vim.cmd('split')
-    vim.cmd('terminal ' .. vim.fn.shellescape(build_paths.build_script_path) .. ' && ' .. vim.fn.shellescape(build_paths.binary_path))
+    vim.cmd 'split'
+    vim.cmd('terminal ' .. vim.fn.shellescape(build_paths.build_script_path))
     vim.cmd 'startinsert'
   end
-
 
   -- [[ Mappings ]]
 
   -- Build & Run
-  vim.keymap.set('n', '<F7>', build_and_run, { desc = 'Build & Run Project' })
+  vim.keymap.set('n', '<F7>', build_and_run, { desc = 'Build Project' })
 
   -- Start Termdebug or Continue if already running
   vim.keymap.set('n', '<F5>', function()
@@ -1105,7 +1156,7 @@ do
     else
       start_debug_session()
     end
-  end, { desc = 'Start or Continue Termdebug' })
+  end, { desc = 'Start Termdebug' })
 
   -- Standard IDE Debugger Mappings
   vim.keymap.set('n', '<F9>', '<cmd>Over<CR>', { desc = 'Step Over' })
