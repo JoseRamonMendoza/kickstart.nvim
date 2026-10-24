@@ -648,44 +648,6 @@ do
     return matched
   end
 
-  -- Custom action: close telescope, jump to/create doc window, and open the header
-  local function open_in_doc_window(prompt_bufnr)
-    -- 1. Grab entry BEFORE closing the picker
-    local entry = action_state.get_selected_entry()
-    actions.close(prompt_bufnr)
-
-    if not entry then return end
-
-    -- Ripgrep returns entry.path or entry.filename, along with lnum and col
-    local filename = entry.path or entry.filename
-    local lnum = entry.lnum or 1
-    local col = entry.col or 1
-
-    -- 2. Ensure the dedicated doc window exists (create or reuse)
-    if not (doc_win_id and vim.api.nvim_win_is_valid(doc_win_id)) then
-      vim.cmd 'botright vsplit'
-      doc_win_id = vim.api.nvim_get_current_win()
-    else
-      vim.api.nvim_set_current_win(doc_win_id)
-    end
-
-    -- 3. Open the file in the doc window and jump to the matching line
-    vim.cmd.edit(vim.fn.fnameescape(filename))
-    pcall(vim.api.nvim_win_set_cursor, doc_win_id, { lnum, math.max(0, col - 1) })
-    vim.cmd 'normal! zz'
-  end
-
-  -- Helper to attach the action to live_grep
-  local function attach_doc_action(prompt_bufnr, map)
-    -- Replaces standard <CR> with your doc window opener
-    --actions.select_default:replace(function() open_in_doc_window(prompt_bufnr) end)
-
-    -- Optional: Keep <C-v> as an explicit doc-opener if you ever restore standard <CR>
-    map({ 'i', 'n' }, '<C-v>', function() open_in_doc_window(prompt_bufnr) end)
-
-    return true
-  end
-
   -- 3. Command definition
   vim.api.nvim_create_user_command('GrepHeaders', function(opts)
     local query = vim.trim(opts.args or '')
@@ -696,7 +658,6 @@ do
         prompt_title = 'Grep Current File Headers',
         search_dirs = search_dirs,
         glob_pattern = globs,
-        attach_mappings = attach_doc_action,
       }
     else
       local matched_paths = find_header_paths_by_query(query)
@@ -709,7 +670,6 @@ do
         prompt_title = 'Grep Headers: ' .. query,
         search_dirs = matched_paths,
         glob_pattern = { '*.h', '*.hpp', '*.hxx', '*.hh' },
-        attach_mappings = attach_doc_action,
       }
     end
   end, {
@@ -734,7 +694,7 @@ do
       local buf = event.buf
 
       -- Find references for the word under your cursor.
-      vim.keymap.set('n', 'grr', function() builtin.lsp_references end, { buffer = buf, desc = '[G]oto [R]eferences' })
+      vim.keymap.set('n', 'grr', builtin.lsp_references, { buffer = buf, desc = '[G]oto [R]eferences' })
 
       -- Jump to the implementation of the word under your cursor.
       -- Useful when your language has ways of declaring types without an actual implementation.
@@ -743,7 +703,7 @@ do
       -- Jump to the definition of the word under your cursor.
       -- This is where a variable was first declared, or where a function is defined, etc.
       -- To jump back, press <C-t>.
-      vim.keymap.set('n', 'grd', function() builtin.lsp_definitions end, { buffer = buf, desc = '[G]oto [D]efinition' })
+      vim.keymap.set('n', 'grd', builtin.lsp_definitions, { buffer = buf, desc = '[G]oto [D]efinition' })
 
       -- Fuzzy find all the symbols in your current document.
       -- Symbols are things like variables, functions, types, etc.
