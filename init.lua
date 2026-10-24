@@ -49,6 +49,9 @@ I hope you enjoy your Neovim journey,
 P.S. You can delete this when you're done too. It's your config now! :)
 --]]
 
+-- Track the dedicated documentation / definition window
+local doc_win_id = nil
+
 -- ============================================================
 -- SECTION 1: OPTIONS
 -- Core Neovim settings, leaders, options
@@ -154,7 +157,7 @@ do
     },
   }
 
-  vim.keymap.set('n', '<leader>q', vim.diagnostic.setloclist, { desc = 'Open diagnostic [Q]uickfix list' })
+  --vim.keymap.set('n', '<leader>q', vim.diagnostic.setloclist, { desc = 'Open diagnostic [Q]uickfix list' })
 
   -- Toogle on/off diagnostics visibility
   vim.keymap.set('n', '<leader>td', function()
@@ -184,7 +187,7 @@ do
   vim.keymap.set('i', '<C-k>', '<Up>')
 
   -- Remove the default Ctrl+C -> Escape mapping in insert mode
-  vim.keymap.set('i', '<C-c>', '', { noremap = true, silent = true })
+  --vim.keymap.set('i', '<C-c>', '', { noremap = true, silent = true })
 
   -- [[ Basic Autocommands ]]
   --  See `:help lua-guide-autocommands`
@@ -350,8 +353,8 @@ do
       vim.keymap.set('n', '<leader>hD', function() gitsigns.diffthis '~' end, { desc = 'git [D]iff against last commit', buf = bufnr })
 
       -- Toggles
-      vim.keymap.set('n', '<leader>tb', gitsigns.toggle_current_line_blame, { desc = '[T]oggle git show [b]lame line', buf = bufnr })
-      vim.keymap.set('n', '<leader>tw', gitsigns.toggle_word_diff, { desc = '[T]oggle git intra-line [w]ord diff', buf = bufnr })
+      --vim.keymap.set('n', '<leader>tb', gitsigns.toggle_current_line_blame, { desc = '[T]oggle git show [b]lame line', buf = bufnr })
+      --vim.keymap.set('n', '<leader>tw', gitsigns.toggle_word_diff, { desc = '[T]oggle git intra-line [w]ord diff', buf = bufnr })
 
       -- Text object
       vim.keymap.set({ 'o', 'x' }, 'ih', gitsigns.select_hunk, { desc = 'text object [i]nside [h]unk', buf = bufnr })
@@ -520,7 +523,9 @@ do
 
   -- See `:help telescope.builtin`
   local builtin = require 'telescope.builtin'
-  vim.keymap.set('n', '<leader>sh', builtin.help_tags, { desc = '[S]earch [H]elp' })
+  local actions = require 'telescope.actions'
+  local action_state = require 'telescope.actions.state'
+
   vim.keymap.set('n', '<leader>sk', builtin.keymaps, { desc = '[S]earch [K]eymaps' })
   vim.keymap.set('n', '<leader>sf', builtin.find_files, { desc = '[S]earch [F]iles' })
   vim.keymap.set('n', '<leader>ss', builtin.builtin, { desc = '[S]earch [S]elect Telescope' })
@@ -531,6 +536,195 @@ do
   vim.keymap.set('n', '<leader>s.', builtin.oldfiles, { desc = '[S]earch Recent Files ("." for repeat)' })
   vim.keymap.set('n', '<leader>sc', builtin.commands, { desc = '[S]earch [C]ommands' })
   vim.keymap.set('n', '<leader><leader>', builtin.buffers, { desc = '[ ] Find existing buffers' })
+  vim.keymap.set('n', '<leader>s/', builtin.current_buffer_fuzzy_find, { desc = '[/] Fuzzily search in current buffer' })
+  vim.keymap.set('n', '<leader>sn', function() builtin.find_files { cwd = vim.fn.stdpath 'config', follow = true } end, { desc = '[S]earch [N]eovim files' })
+
+  -- Create command to search on header files on current file or on header files in the system's path
+  local uv = vim.uv or vim.loop
+
+  -- Query GCC once to detect default system include directories
+  local cached_system_includes = nil
+  local function get_system_include_paths()
+    if cached_system_includes then return cached_system_includes end
+
+    local paths = {}
+    -- 'gcc -E -Wp,-v -' prints the exact search paths configured on your Fedora install
+    local output = vim.fn.systemlist 'gcc -E -Wp,-v - </dev/null 2>&1'
+    local in_list = false
+
+    for _, line in ipairs(output) do
+      if line:match '^#include <...>' then
+        in_list = true
+      elseif line:match '^End of search list' then
+        in_list = false
+      elseif in_list then
+        local dir = line:match '^%s+(%S+)'
+        if dir and uv.fs_stat(dir) then table.insert(paths, dir) end
+      end
+    end
+
+    -- Fallback if gcc output wasn't readable
+    if #paths == 0 then paths = { '/usr/include', '/usr/local/include' } end
+
+    cached_system_includes = paths
+    return paths
+  end
+
+  -- 1. Fast & reliable: Resolve exact header files included in the current buffer
+  local function get_current_file_headers()
+    local buf_name = vim.api.nvim_buf_get_name(0)
+    if buf_name == '' then return { vim.fn.getcwd() }, { '*.h', '*.hpp', '*.hxx', '*.hh' } end
+
+    local buf_dir = vim.fs.dirname(buf_name)
+    local found_headers = {}
+
+    -- Check companion header (e.g., main.c -> main.h)
+    local stem = vim.fn.fnamemodify(buf_name, ':r')
+    for _, ext in ipairs { '.h', '.hpp', '.hxx', '.hh' } do
+      local companion = stem .. ext
+      if uv.fs_stat(companion) and companion ~= buf_name then table.insert(found_headers, companion) end
+    end
+
+    -- Search roots: current directory, workspace folders
+    local search_roots = {
+      buf_dir,
+      vim.fn.getcwd(),
+      vim.fn.getcwd() .. '/include',
+      vim.fn.getcwd() .. '/src',
+    }
+    vim.list_extend(search_roots, get_system_include_paths())
+
+    -- Parse buffer lines for #include directives and check stat directly
+    local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+    for _, line in ipairs(lines) do
+      local inc = line:match '^%s*#%s*include%s*["<](.-)[">]'
+      if inc then
+        for _, root in ipairs(search_roots) do
+          local full_path = root .. '/' .. inc
+          if uv.fs_stat(full_path) and not vim.tbl_contains(found_headers, full_path) then
+            table.insert(found_headers, full_path)
+            break
+          end
+        end
+      end
+    end
+
+    -- Fallback: if no headers resolved, search *.h in current buffer's directory
+    if #found_headers == 0 then return { buf_dir }, { '*.h', '*.hpp', '*.hxx', '*.hh' } end
+
+    return found_headers, nil
+  end
+
+  -- 2. When an argument is passed (e.g. "sdl"): locate paths via pkg-config and find
+  local function find_header_paths_by_query(query)
+    local matched = {}
+
+    -- A. Query pkg-config (tries "sdl", "sdl2", "libsdl", etc.)
+    for _, pkg in ipairs { query, query .. '2', 'lib' .. query } do
+      local cflags = vim.fn.system(string.format('pkg-config --cflags-only-I %s 2>/dev/null', vim.fn.shellescape(pkg)))
+      if vim.v.shell_error == 0 and cflags ~= '' then
+        for path in cflags:gmatch '%-I(%S+)' do
+          if uv.fs_stat(path) and not vim.tbl_contains(matched, path) then table.insert(matched, path) end
+        end
+      end
+    end
+
+    -- B. Run a shallow 'find' across  system include dirs for directories matching query
+    local sys_dirs = get_system_include_paths()
+    if #sys_dirs > 0 then
+      local escaped_roots = table.concat(vim.tbl_map(function(d) return vim.fn.shellescape(d) end, sys_dirs), ' ')
+      local cmd = string.format('find %s -maxdepth 2 -type d -iname "*%s*" 2>/dev/null', escaped_roots, query)
+      for _, path in ipairs(vim.fn.systemlist(cmd)) do
+        if path ~= '' and not vim.tbl_contains(matched, path) then table.insert(matched, path) end
+      end
+    end
+
+    -- C. Check for matching folders in the local project
+    local project_cmd = string.format('find %s -maxdepth 3 -type d -iname "*%s*" 2>/dev/null', vim.fn.shellescape(vim.fn.getcwd()), query)
+    for _, path in ipairs(vim.fn.systemlist(project_cmd)) do
+      if path ~= '' and not vim.tbl_contains(matched, path) then table.insert(matched, path) end
+    end
+
+    return matched
+  end
+
+  -- Custom action: close telescope, jump to/create doc window, and open the header
+  local function open_in_doc_window(prompt_bufnr)
+    -- 1. Grab entry BEFORE closing the picker
+    local entry = action_state.get_selected_entry()
+    actions.close(prompt_bufnr)
+
+    if not entry then return end
+
+    -- Ripgrep returns entry.path or entry.filename, along with lnum and col
+    local filename = entry.path or entry.filename
+    local lnum = entry.lnum or 1
+    local col = entry.col or 1
+
+    -- 2. Ensure the dedicated doc window exists (create or reuse)
+    if not (doc_win_id and vim.api.nvim_win_is_valid(doc_win_id)) then
+      vim.cmd 'botright vsplit'
+      doc_win_id = vim.api.nvim_get_current_win()
+    else
+      vim.api.nvim_set_current_win(doc_win_id)
+    end
+
+    -- 3. Open the file in the doc window and jump to the matching line
+    vim.cmd.edit(vim.fn.fnameescape(filename))
+    pcall(vim.api.nvim_win_set_cursor, doc_win_id, { lnum, math.max(0, col - 1) })
+    vim.cmd 'normal! zz'
+  end
+
+  -- Helper to attach the action to live_grep
+  local function attach_doc_action(prompt_bufnr, map)
+    -- Replaces standard <CR> with your doc window opener
+    --actions.select_default:replace(function() open_in_doc_window(prompt_bufnr) end)
+
+    -- Optional: Keep <C-v> as an explicit doc-opener if you ever restore standard <CR>
+    map({ 'i', 'n' }, '<C-v>', function() open_in_doc_window(prompt_bufnr) end)
+
+    return true
+  end
+
+  -- 3. Command definition
+  vim.api.nvim_create_user_command('GrepHeaders', function(opts)
+    local query = vim.trim(opts.args or '')
+
+    if query == '' then
+      local search_dirs, globs = get_current_file_headers()
+      builtin.live_grep {
+        prompt_title = 'Grep Current File Headers',
+        search_dirs = search_dirs,
+        glob_pattern = globs,
+        attach_mappings = attach_doc_action,
+      }
+    else
+      local matched_paths = find_header_paths_by_query(query)
+      if #matched_paths == 0 then
+        vim.notify("No header paths matching '" .. query .. "' found", vim.log.levels.WARN)
+        return
+      end
+
+      builtin.live_grep {
+        prompt_title = 'Grep Headers: ' .. query,
+        search_dirs = matched_paths,
+        glob_pattern = { '*.h', '*.hpp', '*.hxx', '*.hh' },
+        attach_mappings = attach_doc_action,
+      }
+    end
+  end, {
+    nargs = '?',
+    complete = function(lead)
+      local sys_dirs = get_system_include_paths()
+      if #sys_dirs == 0 then return {} end
+      local escaped = table.concat(vim.tbl_map(function(d) return vim.fn.shellescape(d) end, sys_dirs), ' ')
+      return vim.fn.systemlist(string.format('find %s -maxdepth 1 -type d -iname "%s*" -printf "%%f\\n" 2>/dev/null', escaped, lead))
+    end,
+    desc = 'Grep in headers (empty for current file, or pass name like sdl)',
+  })
+
+  -- 4. Keymap: Prefills the command on the command line
+  vim.keymap.set('n', '<leader>sh', ':GrepHeaders ', { desc = '[S]earch [H]eaders' })
 
   -- Add Telescope-based LSP pickers when an LSP attaches to a buffer.
   -- If you later switch picker plugins, this is where to update these mappings.
@@ -540,7 +734,7 @@ do
       local buf = event.buf
 
       -- Find references for the word under your cursor.
-      vim.keymap.set('n', 'grr', builtin.lsp_references, { buffer = buf, desc = '[G]oto [R]eferences' })
+      vim.keymap.set('n', 'grr', function() builtin.lsp_references end, { buffer = buf, desc = '[G]oto [R]eferences' })
 
       -- Jump to the implementation of the word under your cursor.
       -- Useful when your language has ways of declaring types without an actual implementation.
@@ -549,15 +743,15 @@ do
       -- Jump to the definition of the word under your cursor.
       -- This is where a variable was first declared, or where a function is defined, etc.
       -- To jump back, press <C-t>.
-      vim.keymap.set('n', 'grd', builtin.lsp_definitions, { buffer = buf, desc = '[G]oto [D]efinition' })
+      vim.keymap.set('n', 'grd', function() builtin.lsp_definitions end, { buffer = buf, desc = '[G]oto [D]efinition' })
 
       -- Fuzzy find all the symbols in your current document.
       -- Symbols are things like variables, functions, types, etc.
-      vim.keymap.set('n', 'gO', builtin.lsp_document_symbols, { buffer = buf, desc = 'Open Document Symbols' })
+      vim.keymap.set('n', 'grO', builtin.lsp_document_symbols, { buffer = buf, desc = 'Open Document Symbols' })
 
       -- Fuzzy find all the symbols in your current workspace.
       -- Similar to document symbols, except searches over your entire project.
-      vim.keymap.set('n', 'gW', builtin.lsp_dynamic_workspace_symbols, { buffer = buf, desc = 'Open Workspace Symbols' })
+      vim.keymap.set('n', 'grW', builtin.lsp_dynamic_workspace_symbols, { buffer = buf, desc = 'Open Workspace Symbols' })
 
       -- Jump to the type of the word under your cursor.
       -- Useful when you're not sure what type a variable is and you want to see
@@ -565,32 +759,6 @@ do
       vim.keymap.set('n', 'grt', builtin.lsp_type_definitions, { buffer = buf, desc = '[G]oto [T]ype Definition' })
     end,
   })
-
-  -- Override default behavior and theme when searching
-  vim.keymap.set('n', '<leader>/', function()
-    -- You can pass additional configuration to Telescope to change the theme, layout, etc.
-    builtin.current_buffer_fuzzy_find(require('telescope.themes').get_dropdown {
-      winblend = 10,
-      previewer = false,
-    })
-  end, { desc = '[/] Fuzzily search in current buffer' })
-
-  -- It's also possible to pass additional configuration options.
-  --  See `:help telescope.builtin.live_grep()` for information about particular keys
-  vim.keymap.set(
-    'n',
-    '<leader>s/',
-    function()
-      builtin.live_grep {
-        grep_open_files = true,
-        prompt_title = 'Live Grep in Open Files',
-      }
-    end,
-    { desc = '[S]earch [/] in Open Files' }
-  )
-
-  -- Shortcut for searching your Neovim configuration files
-  vim.keymap.set('n', '<leader>sn', function() builtin.find_files { cwd = vim.fn.stdpath 'config', follow = true } end, { desc = '[S]earch [N]eovim files' })
 end
 
 -- ============================================================
@@ -657,11 +825,7 @@ do
       --  For example, in C this would take you to the header.
       map('grD', vim.lsp.buf.declaration, '[G]oto [D]eclaration')
 
-      -- Track the dedicated documentation / definition window
-      local doc_win_id = nil
-
       local function goto_definition_in_doc_win()
-
         vim.lsp.buf.definition {
           on_list = function(options)
             local items = options.items
